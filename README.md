@@ -25,6 +25,8 @@ export PATH=$PATH:/usr/bin/cli-companion
 
 In your project root directory in terminal just write ```companion``` to start the cli
 
+Generating models and repositories with ```companion -operation make -namespace model```
+
 ## License
 
 [GPL](https://choosealicense.com/licenses/gpl-3.0/)
