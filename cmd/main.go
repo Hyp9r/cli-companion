@@ -2,43 +2,26 @@ package main
 
 import (
 	"bufio"
-	"bytes"
+	"flag"
 	"fmt"
-	"html/template"
 	"io/ioutil"
 	"os"
 	"os/exec"
-	"regexp"
 	"strings"
-	"unicode"
 
+	"github.com/Hyp9r/cli-companion/gen"
+	"github.com/Hyp9r/cli-companion/prompt"
 	"github.com/fatih/color"
 )
 
 const (
-	INPUT_DONE                     = ""
-	REPOSITORY_INFRASTRUCTRUE_PATH = "./infrastructure"
-	DOMAIN_PATH                    = "./domain"
+	NAMESPACE = "namespace"
+	OPERATION = "operation"
 )
 
-// QUERY u update functionu
-
-var matchFirstCap = regexp.MustCompile("(.)([A-Z][a-z]+)")
-var matchAllCap = regexp.MustCompile("([a-z0-9])([A-Z])")
-
-type Field struct {
-	Name string
-	Type string
-}
-
-type Template struct {
-	Filename       string
-	ModelName      string
-	Module         string
-	Path           string
-	ModelFields    []Field
-	DatabaseFields []string
-	FieldSize      int
+type CMDArguments struct {
+	Operation string
+	Namespace string
 }
 
 func main() {
@@ -47,114 +30,116 @@ func main() {
 	cmd.Stdout = os.Stdout
 	cmd.Run()
 
-	executablePath, err := os.Executable()
+	// Load CMD arguments
+	args := loadArguments()
+	err := validateArguments(args)
 	if err != nil {
 		panic(err)
 	}
+
+	// Find the path of the executable so we can determine template locations
+	executablePath, err := findPathOfExecutable()
+	if err != nil {
+		panic(err)
+	}
+
+	// String kung-fu to slash out the last part of the path
 	lastSlashIndex := strings.LastIndex(executablePath, "/")
+
+	// Setup paths of templates
 	templatesPath := executablePath[:lastSlashIndex]
 	repositoryTemplatePath := fmt.Sprintf("%s/templates/%s", templatesPath, "repository.tmpl")
 	modelTemplatePath := fmt.Sprintf("%s/templates/%s", templatesPath, "model.tmpl")
 
-	fmt.Printf("pwd: %s\n", templatesPath)
-
 	// Setup scanner
 	scanner := bufio.NewScanner(os.Stdin)
 
-	// Setup colors
-	info := color.New(color.FgHiYellow).Add(color.Underline)
-	question := color.New(color.FgCyan).Add(color.Underline)
-	answer := color.New(color.FgGreen).Add(color.Underline)
-
-	info.Println("Welcome database generation cli")
-
-	question.Println("Provide github repository or module")
-	scanner.Scan()
-	module := scanner.Text()
-
-	question.Println("How would you like to name your model? ")
-	scanner.Scan()
-	modelName := scanner.Text()
-	fileName := toLowerCase(modelName)
-
-	// Initialize folder structure
-	repositoryInfraFolder := fmt.Sprintf("%s/%s", REPOSITORY_INFRASTRUCTRUE_PATH, fileName)
-	domainModelFolder := fmt.Sprintf("%s/%s/model", DOMAIN_PATH, fileName)
-
-	// Create folders
-	err = makeDirectories(repositoryInfraFolder)
-	if err != nil {
-		panic(err)
-	}
-	err = makeDirectories(domainModelFolder)
+	// Create prompter and start it
+	prompter := prompt.NewPrompter(scanner, prompt.PrompterType{Operation: args.Operation, Namespace: args.Namespace})
+	promptResult, err := prompter.Start()
 	if err != nil {
 		panic(err)
 	}
 
-	var modelFields []Field
-	var databaseFields []string
-	fieldSize := 0
-
-	for {
-		question.Println("Enter the name of the field(ENTER to finish): ")
-		scanner.Scan()
-		operation := scanner.Text()
-		// Check if user is done
-		if operation == INPUT_DONE {
-			break
-		}
-		question.Println("Enter the type of the field: ")
-		scanner.Scan()
-		fieldType := scanner.Text()
-		field := Field{
-			Name: operation,
-			Type: fieldType,
-		}
-		modelFields = append(modelFields, field)
-		databaseFields = append(databaseFields, toSnakeCase(operation))
-		fieldSize++
+	// Create generator and generate code
+	generator := gen.NewGenerator(repositoryTemplatePath, modelTemplatePath)
+	code, err := generator.Generate(promptResult)
+	if err != nil {
+		panic(err)
 	}
-
-	// Create a new template model
-	templateModel := Template{
-		Filename:       fmt.Sprintf("%s.go", fileName),
-		ModelName:      modelName,
-		Module:         module,
-		Path:           fileName,
-		DatabaseFields: databaseFields,
-		ModelFields:    modelFields,
-		FieldSize:      fieldSize - 1,
+	// Prepare folders
+	err = generator.PrepareDirectories(promptResult.ModelResult.RepositoryFolder)
+	if err != nil {
+		panic(err)
+	}
+	err = generator.PrepareDirectories(promptResult.ModelResult.ModelFolder)
+	if err != nil {
+		panic(err)
 	}
 
 	// run the generation
-	repoFileContents := generate(templateModel, repositoryTemplatePath)
-	modelFileContents := generate(templateModel, modelTemplatePath)
-	err = saveFile(repoFileContents, fmt.Sprintf("%s/%s", repositoryInfraFolder, "repository.go"))
+	err = saveFile(code.RepositoryCode, fmt.Sprintf("%s/%s", promptResult.ModelResult.RepositoryFolder, "repository.go"))
 	if err != nil {
 		panic(err)
 	}
-	err = saveFile(modelFileContents, fmt.Sprintf("%s/%s.go", domainModelFolder, fileName))
+	err = saveFile(code.ModelCode, fmt.Sprintf("%s/%s.go", promptResult.ModelResult.ModelFolder, "model.go"))
 	if err != nil {
 		panic(err)
 	}
 
-	answer.Printf("%s.go model created\n", fileName)
+	answer := color.New(color.FgGreen).Add(color.Underline)
+	answer.Printf("%s.go and repository.go created\n", promptResult.ModelResult.Filename)
 }
 
-func generate(model Template, pathToTemplate string) string {
-	var buf bytes.Buffer
-	tmpl, err := template.ParseFiles(pathToTemplate)
-	if err != nil {
-		panic(err)
+func loadArguments() CMDArguments {
+	operation := flag.String(OPERATION, "list", "Operation which you want to do, list to see possibilities")
+	namespace := flag.String(NAMESPACE, "", "Namespace for which you want generation(model, controller)")
+	flag.Parse()
+	if operation != nil && len(*operation) == 0 {
+		panic(fmt.Errorf("no operation provided or provided more then one"))
 	}
-
-	// Execute the template with the person data
-	err = tmpl.Execute(&buf, model)
-	if err != nil {
-		panic(err)
+	if namespace != nil && len(*namespace) == 0 {
+		panic(fmt.Errorf("no namespace provided or provided more then one"))
 	}
+	return CMDArguments{
+		Operation: *operation,
+		Namespace: *namespace,
+	}
+}
 
-	return buf.String()
+func findPathOfExecutable() (string, error) {
+	executablePath, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	return executablePath, nil
+}
+
+func validateArguments(args CMDArguments) error {
+	var ok bool
+	switch args.Operation {
+	case "list":
+	case "make":
+		ok = true
+		break
+	default:
+		ok = false
+	}
+	if !ok {
+		return fmt.Errorf("invalid operation")
+	}
+	switch args.Namespace {
+	case "model":
+	case "controller":
+		ok = true
+		break
+	default:
+		ok = false
+	}
+	if !ok {
+		return fmt.Errorf("invalid namespace")
+	}
+	return nil
 }
 
 func saveFile(content string, filePath string) error {
@@ -164,26 +149,5 @@ func saveFile(content string, filePath string) error {
 		return fmt.Errorf("failed to write file: %v", err)
 	}
 
-	return nil
-}
-
-func toSnakeCase(str string) string {
-	snake := matchFirstCap.ReplaceAllString(str, "${1}_${2}")
-	snake = matchAllCap.ReplaceAllString(snake, "${1}_${2}")
-	return strings.ToLower(snake)
-}
-
-func toLowerCase(str string) string {
-	firstChar := rune(str[0])
-	if unicode.IsUpper(firstChar) {
-		firstChar = unicode.ToLower(firstChar)
-	}
-	return string(firstChar) + str[1:]
-}
-
-func makeDirectories(path string) error {
-	if err := os.MkdirAll(path, os.ModePerm); err != nil {
-		return err
-	}
 	return nil
 }
