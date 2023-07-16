@@ -1,0 +1,82 @@
+package {{.Path}}
+
+import (
+	"database/sql"
+	"fmt"
+
+	"{{ .Module }}/domain/common"
+	"{{ .Module }}/domain/{{.Path}}/model"
+)
+
+type Repository struct {
+	*sql.DB
+}
+
+func NewRepository(db *sql.DB) *Repository {
+	return &Repository{
+		DB: db,
+	}
+}
+
+func (r *Repository) Find(query common.Query) (model.{{.ModelName}}, error) {
+	queryStr := fmt.Sprintf("SELECT * FROM {{.Path}} WHERE %s=?", query.Field)
+	row := r.DB.QueryRow(queryStr, query.Search)
+	if row.Err() != nil {
+		return model.{{.ModelName}}{}, row.Err()
+	}
+	var {{.Path}} model.{{.ModelName}}
+	err := row.Scan({{ range $index, $value := .ModelFields }}&{{$.Path}}.{{ $value.Name }}{{if ne $index $.FieldSize}},{{end}}{{ end }})
+	if err != nil {
+		return model.{{.ModelName}}{}, err
+	}
+	return {{.Path}}, nil
+}
+
+func (r *Repository) FindAll(query common.Query) ([]model.{{.ModelName}}, error) {
+	queryStr := fmt.Sprintf("SELECT * FROM {{.Path}} WHERE %s=?", query.Field)
+	rows, err := r.DB.Query(queryStr, query.Field)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var {{.Path}}s []model.{{.ModelName}}
+	for rows.Next() {
+		var {{.Path}} model.{{.ModelName}}
+		err := rows.Scan({{ range $index, $value := .ModelFields }}&{{$.Path}}.{{ $value.Name }}{{if ne $index $.FieldSize}},{{end}}{{ end }})
+		if err != nil {
+			return nil, err
+		}
+		{{.Path}}s = append({{.Path}}s, {{.Path}})
+	}
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	return {{.Path}}s, nil
+}
+
+func (r *Repository) Save({{.Path}} model.{{.ModelName}}) error {
+	query := "INSERT INTO {{.Path}} ({{ range $index, $value := .DatabaseFields }}{{if ne $index 0}}{{ $value }}{{end}}{{if and (ne $index $.FieldSize) (ne $index 0)}},{{end}}{{ end }}) VALUES({{ range $index, $value := .DatabaseFields }}{{if ne $index 0}}?{{end}}{{if and (ne $index $.FieldSize) (ne $index 0)}},{{end}}{{end}})"
+	result, err := r.DB.Exec(query, {{ range $index, $value := .ModelFields }}{{if ne $index 0}}{{$.Path}}.{{ $value.Name }}{{end}}{{if and (ne $index $.FieldSize) (ne $index 0)}},{{end}}{{ end }})
+	if err != nil {
+		return err
+	}
+	_, err = result.LastInsertId()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r *Repository) Update({{.Path}} model.{{.ModelName}}) error {
+	query := "UPDATE {{.Path}} SET {{ range $index, $value := .DatabaseFields }}{{if ne $index 0}}{{ $value }} = ?{{end}}{{if and (ne $index $.FieldSize) (ne $index 0)}}, {{end}}{{ end }} WHERE {{ index .DatabaseFields 0}} = ?"
+	result, err := r.DB.Exec(query, {{ range $index, $value := .ModelFields }}{{if ne $index 0}}{{$.Path}}.{{ $value.Name }}{{end}}{{if and (ne $index $.FieldSize) (ne $index 0)}},{{end}}{{ end }})
+	if err != nil {
+		return err
+	}
+	_, err = result.LastInsertId()
+	if err != nil {
+		return err
+	}
+	return nil
+}
