@@ -47,6 +47,17 @@ func main() {
 	cmd.Stdout = os.Stdout
 	cmd.Run()
 
+	executablePath, err := os.Executable()
+	if err != nil {
+		panic(err)
+	}
+	lastSlashIndex := strings.LastIndex(executablePath, "/")
+	templatesPath := executablePath[:lastSlashIndex]
+	repositoryTemplatePath := fmt.Sprintf("%s/templates/%s", templatesPath, "repository.tmpl")
+	modelTemplatePath := fmt.Sprintf("%s/templates/%s", templatesPath, "model.tmpl")
+
+	fmt.Printf("pwd: %s\n", templatesPath)
+
 	// Setup scanner
 	scanner := bufio.NewScanner(os.Stdin)
 
@@ -71,7 +82,7 @@ func main() {
 	domainModelFolder := fmt.Sprintf("%s/%s/model", DOMAIN_PATH, fileName)
 
 	// Create folders
-	err := makeDirectories(repositoryInfraFolder)
+	err = makeDirectories(repositoryInfraFolder)
 	if err != nil {
 		panic(err)
 	}
@@ -116,8 +127,8 @@ func main() {
 	}
 
 	// run the generation
-	repoFileContents := generate(templateModel, "templates/repository.tmpl")
-	modelFileContents := generate(templateModel, "templates/model.tmpl")
+	repoFileContents := generate(templateModel, repositoryTemplatePath)
+	modelFileContents := generate(templateModel, modelTemplatePath)
 	err = saveFile(repoFileContents, fmt.Sprintf("%s/%s", repositoryInfraFolder, "repository.go"))
 	if err != nil {
 		panic(err)
