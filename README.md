@@ -21,7 +21,7 @@ Add companion to PATH in your bashrc or zshrc file
 export PATH=$PATH:/usr/bin/cli-companion
 ```
 
-## Useage
+## Usage
 
 In your project root directory in terminal just write ```companion``` to start the cli
 
